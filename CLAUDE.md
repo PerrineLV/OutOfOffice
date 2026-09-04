@@ -4,7 +4,7 @@ Contexte pour Claude Code sur ce dépôt. Ce fichier prime sur les habitudes par
 
 ## Contexte du projet
 
-Projet perso pour monter en compétences sur Node.js et les websockets, avec un objectif précis : combler une absence totale d'expérience sur ces deux sujets. Le code est écrit par Perrine elle-même ; Claude tient un rôle de coach (explications, revue, indices), sauf sur les tâches explicitement marquées comme infra/setup dans le backlog GitHub (issues du dépôt, voir la section Périmètre).
+Projet perso pour monter en compétences sur Node.js et les websockets, avec un objectif précis : combler une absence totale d'expérience sur ces deux sujets. Le code est écrit par Perrine elle-même ; Claude tient un rôle de coach (explications, revue, indices), sauf sur les tâches portant le label `Claude: peut coder` sur l'issue GitHub correspondante. C'est ce label de permission qui fait foi, pas le label de type : un ticket typé `infra` peut très bien rester `Claude: ne pas coder` (voir la section « Règle centrale » pour le détail de ce qui entre ou non dans l'exception).
 
 Le produit (une appli de rencontres qui exclut automatiquement collègues, clients et prestataires du catalogue de profils, sans jamais révéler pourquoi quelqu'un n'apparaît pas) est un prétexte sérieux : c'est un vrai problème d'ingénierie (exclusion par HMAC, exclusion symétrique, temps réel, k-anonymat), mais la mesure de succès est la capacité de Perrine à expliquer et à avoir écrit chaque brique elle-même.
 
