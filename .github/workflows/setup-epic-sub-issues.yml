@@ -1,0 +1,41 @@
+name: Setup epic sub-issues
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  link-sub-issues:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: PerrineLV/OutOfOffice
+      EPIC_ISSUES: "40 41 42 43 44 45 46 47 48"
+
+    steps:
+      - name: Link existing issues to their epic
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for epic in $EPIC_ISSUES; do
+            body="$(gh issue view "$epic" --repo "$REPOSITORY" --json body --jq '.body')"
+            mapfile -t children < <(
+              printf '%s\n' "$body" |
+                sed -nE 's/^- \[[ xX]\] #([0-9]+).*/\1/p'
+            )
+
+            if [ "${#children[@]}" -eq 0 ]; then
+              echo "No child found for epic #$epic"
+              continue
+            fi
+
+            for child in "${children[@]}"; do
+              echo "Linking #$child to epic #$epic"
+              gh issue edit "$epic"                 --repo "$REPOSITORY"                 --add-sub-issue "$child" ||
+                echo "Issue #$child is probably already linked to epic #$epic"
+            done
+          done
