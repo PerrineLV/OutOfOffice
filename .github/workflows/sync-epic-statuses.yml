@@ -1,0 +1,245 @@
+name: Sync epic statuses
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: epic-status-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.event_name == 'workflow_dispatch' || vars.EPIC_SYNC_ENABLED == 'true'
+    runs-on: ubuntu-latest
+
+    env:
+      GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+      OWNER: PerrineLV
+      REPOSITORY: PerrineLV/OutOfOffice
+      PROJECT_NUMBER: "8"
+      EPIC_ISSUES: "40 41 42 43 44 45 46 47 48"
+      READY_STATUS: Ready
+      IN_PROGRESS_STATUS: In Progress
+      DONE_STATUS: Done
+
+    steps:
+      - name: Synchronize epic and child statuses
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::The PROJECT_TOKEN repository secret is missing."
+            exit 1
+          fi
+
+          echo "Adding backlog issues and epics to Project $PROJECT_NUMBER when needed"
+          for issue in $(seq 1 48); do
+            gh project item-add "$PROJECT_NUMBER"               --owner "$OWNER"               --url "https://github.com/$REPOSITORY/issues/$issue"               >/dev/null 2>&1 || true
+          done
+
+          gh api graphql             -F login="$OWNER"             -F number="$PROJECT_NUMBER"             -f query='
+              query($login: String!, $number: Int!) {
+                user(login: $login) {
+                  projectV2(number: $number) {
+                    id
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2SingleSelectField {
+                          id
+                          name
+                          options {
+                            id
+                            name
+                          }
+                        }
+                      }
+                    }
+                    items(first: 100) {
+                      nodes {
+                        id
+                        content {
+                          __typename
+                          ... on Issue {
+                            number
+                            state
+                            repository {
+                              nameWithOwner
+                            }
+                          }
+                        }
+                        fieldValues(first: 20) {
+                          nodes {
+                            ... on ProjectV2ItemFieldSingleSelectValue {
+                              name
+                              field {
+                                ... on ProjectV2SingleSelectField {
+                                  name
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ' > project.json
+
+          project_id="$(jq -r '.data.user.projectV2.id // empty' project.json)"
+          status_field_id="$(jq -r '
+            .data.user.projectV2.fields.nodes[]
+            | select(.name == "Status")
+            | .id
+          ' project.json)"
+
+          option_id() {
+            local wanted="$1"
+            jq -r --arg wanted "$wanted" '
+              .data.user.projectV2.fields.nodes[]
+              | select(.name == "Status")
+              | .options[]
+              | select((.name | ascii_downcase) == ($wanted | ascii_downcase))
+              | .id
+            ' project.json | head -n 1
+          }
+
+          ready_id="$(option_id "$READY_STATUS")"
+          in_progress_id="$(option_id "$IN_PROGRESS_STATUS")"
+          done_id="$(option_id "$DONE_STATUS")"
+
+          if [ -z "$project_id" ] || [ -z "$status_field_id" ]; then
+            echo "::error::Project 8 or its Status field could not be found."
+            exit 1
+          fi
+
+          if [ -z "$ready_id" ] || [ -z "$in_progress_id" ] || [ -z "$done_id" ]; then
+            echo "::error::The Status field must contain Ready, In Progress and Done options."
+            exit 1
+          fi
+
+          issue_item() {
+            local number="$1"
+            jq -c               --arg repository "$REPOSITORY"               --argjson number "$number" '
+                .data.user.projectV2.items.nodes[]
+                | select(
+                    .content.__typename == "Issue"
+                    and .content.repository.nameWithOwner == $repository
+                    and .content.number == $number
+                  )
+                | {
+                    id,
+                    state: .content.state,
+                    status: (
+                      [
+                        .fieldValues.nodes[]
+                        | select(.field.name == "Status")
+                        | .name
+                      ][0] // ""
+                    )
+                  }
+              ' project.json | head -n 1
+          }
+
+          set_status() {
+            local number="$1"
+            local wanted="$2"
+            local wanted_id="$3"
+            local item current item_id
+
+            item="$(issue_item "$number")"
+            if [ -z "$item" ]; then
+              echo "::warning::Issue #$number is not present in the project."
+              return
+            fi
+
+            current="$(jq -r '.status' <<< "$item")"
+            if [ "${current,,}" = "${wanted,,}" ]; then
+              return
+            fi
+
+            item_id="$(jq -r '.id' <<< "$item")"
+            gh project item-edit               --id "$item_id"               --project-id "$project_id"               --field-id "$status_field_id"               --single-select-option-id "$wanted_id"               >/dev/null
+
+            echo "Issue #$number: ${current:-No status} -> $wanted"
+          }
+
+          for epic in $EPIC_ISSUES; do
+            parent_item="$(issue_item "$epic")"
+            if [ -z "$parent_item" ]; then
+              echo "::warning::Epic #$epic is not present in the project."
+              continue
+            fi
+
+            parent_status="$(jq -r '.status' <<< "$parent_item")"
+            body="$(gh issue view "$epic" --repo "$REPOSITORY" --json body --jq '.body')"
+            mapfile -t children < <(
+              printf '%s\n' "$body" |
+                sed -nE 's/^- \[[ xX]\] #([0-9]+).*/\1/p'
+            )
+
+            if [ "${#children[@]}" -eq 0 ]; then
+              echo "::warning::No child found for epic #$epic."
+              continue
+            fi
+
+            all_done=true
+            any_started=false
+            any_ready=false
+
+            for child in "${children[@]}"; do
+              child_item="$(issue_item "$child")"
+              if [ -z "$child_item" ]; then
+                all_done=false
+                continue
+              fi
+
+              child_state="$(jq -r '.state' <<< "$child_item")"
+              child_status="$(jq -r '.status' <<< "$child_item")"
+              normalized="${child_status,,}"
+
+              if [ "$child_state" = "CLOSED" ] || [ "$normalized" = "${DONE_STATUS,,}" ]; then
+                any_started=true
+              elif [ "$normalized" = "${IN_PROGRESS_STATUS,,}" ]; then
+                all_done=false
+                any_started=true
+              else
+                all_done=false
+                if [ "$normalized" = "${READY_STATUS,,}" ]; then
+                  any_ready=true
+                fi
+              fi
+            done
+
+            if [ "${parent_status,,}" = "${READY_STATUS,,}" ]; then
+              for child in "${children[@]}"; do
+                child_item="$(issue_item "$child")"
+                [ -n "$child_item" ] || continue
+
+                child_status="$(jq -r '.status' <<< "$child_item")"
+                normalized="${child_status,,}"
+
+                case "$normalized" in
+                  ""|"todo"|"backlog"|"pas commencé"|"not started")
+                    set_status "$child" "$READY_STATUS" "$ready_id"
+                    any_ready=true
+                    ;;
+                esac
+              done
+            fi
+
+            if [ "$all_done" = true ]; then
+              set_status "$epic" "$DONE_STATUS" "$done_id"
+            elif [ "$any_started" = true ]; then
+              set_status "$epic" "$IN_PROGRESS_STATUS" "$in_progress_id"
+            elif [ "$any_ready" = true ] || [ "${parent_status,,}" = "${READY_STATUS,,}" ]; then
+              set_status "$epic" "$READY_STATUS" "$ready_id"
+            fi
+          done
