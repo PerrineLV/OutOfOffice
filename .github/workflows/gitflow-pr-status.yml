@@ -64,8 +64,13 @@ jobs:
           if [[ "$BASE_BRANCH" =~ ^epic/([0-9]+)-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
             epic_number="${BASH_REMATCH[1]}"
 
+            if [ "$HEAD_BRANCH" = "dev" ]; then
+              echo "kind=sync" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
             [[ "$HEAD_BRANCH" =~ ^ticket/([0-9]+)-[a-z0-9]+(-[a-z0-9]+)*$ ]] ||
-              fail "Only ticket/<issue>-<slug> branches can target an epic branch."
+              fail "Only ticket/<issue>-<slug> or dev can target an epic branch."
 
             ticket_number="${BASH_REMATCH[1]}"
             epic_body="$(gh issue view "$epic_number" --repo "$REPOSITORY" --json body --jq '.body')"

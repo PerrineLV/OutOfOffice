@@ -12,6 +12,7 @@ ticket/<ticket>-<slug> -> epic/<epic>-<slug> -> dev -> main
 - Each ticket has its own `ticket/<issue>-<slug>` branch, created from its epic branch.
 - `chore/<slug>` branches may target `dev` for repository maintenance.
 - Only `dev` may target `main`.
+- `dev` may target an epic branch only to refresh that long-lived branch.
 
 ## Automated statuses
 
@@ -56,6 +57,8 @@ The scheduled epic synchronization runs when the repository variable `EPIC_SYNC_
 
 The workflow finds the ticket in its epic checklist, finds the matching epic branch, creates the ticket branch from it, and moves the ticket to `In Progress`.
 
+Before starting work on an epic that has been waiting for a while, refresh it with a pull request whose source is `dev` and whose target is the epic branch. This incorporates the previously completed epics without bypassing branch protection. The refresh PR does not change any Project status.
+
 To work locally afterward:
 
 ```bash
@@ -70,6 +73,7 @@ The `Validate Gitflow` check verifies:
 - a ticket PR targets the correct epic branch;
 - the ticket is listed as a child of that epic;
 - an epic PR targets `dev`;
+- `dev` may target an epic only for synchronization;
 - only `dev` targets `main`;
 - branch names follow the documented convention.
 
