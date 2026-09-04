@@ -1,0 +1,29 @@
+/*
+ * Jetons de design "Out of Office", extraits de la charte graphique
+ * (voir docs/charte-graphique.md et la page Notion source).
+ *
+ * Ce fichier est un point de départ à importer tel quel dans le projet
+ * front une fois sa structure posée. Ne pas modifier les valeurs sans
+ * mettre à jour la charte source (Notion / Canva) en parallèle.
+ */
+
+:root {
+  /* Couleurs */
+  --color-cream: #fff7f0;
+  --color-ink: #0e1b2a;
+  --color-coral: #ff6b6b;
+  --color-lavender: #a78bfa;
+  --color-mint: #b8f2e6;
+
+  /* Typographie */
+  --font-display: "Space Grotesk", sans-serif;
+  --font-body: "DM Sans", sans-serif;
+
+  /* Espacement (grille 8 / 16 / 24 px) */
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+
+  /* Focus clavier, au moins 2px, voir règles d'accessibilité */
+  --focus-ring: 0 0 0 3px var(--color-lavender);
+}
