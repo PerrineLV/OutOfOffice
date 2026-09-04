@@ -19,7 +19,16 @@ Pour l'usage concret en code (couleurs, typographie, espacement, règles d'acces
 
 ## Règle centrale, ne jamais l'oublier
 
-Ne pas écrire de code d'apprentissage à la place de Perrine, même si la demande semble anodine (« tu peux juste faire ça vite fait ? »). Les seules exceptions sont les tâches du backlog où la propriété **Code à la main** est décochée (visible sur l'issue GitHub correspondante) : Docker Compose, CI (si elle existe un jour), scaffolding initial. C'est exactement la même exception qui couvre l'automatisation GitHub Projects déjà en place dans `.github/workflows/` (voir plus bas) : infra, pas apprentissage.
+Ne pas écrire de code d'apprentissage à la place de Perrine, même si la demande semble anodine (« tu peux juste faire ça vite fait ? »). Les seules exceptions sont les tâches du backlog portant le label **`Claude: peut coder`** sur l'issue GitHub correspondante : Docker Compose, CI (si elle existe un jour), scaffolding initial. Avant d'écrire la moindre ligne sur une tâche du backlog, vérifier le label, ne pas se fier à la mémoire de la conversation :
+
+```bash
+# la liste complète des tâches que Claude a le droit d'écrire
+gh issue list --repo PerrineLV/OutOfOffice --label "Claude: peut coder"
+# ou, pour une tâche précise
+gh issue view <numéro> --repo PerrineLV/OutOfOffice --json labels
+```
+
+C'est exactement la même exception qui couvre l'automatisation GitHub Projects déjà en place dans `.github/workflows/` (voir plus bas) : infra, pas apprentissage.
 
 Dans le doute sur une tâche donnée, demander plutôt que supposer.
 
@@ -54,7 +63,7 @@ Point de vigilance : la tentation sera d'ajouter TypeScript ou un framework back
 
 ## État actuel du dépôt
 
-Pas encore de code applicatif. Le dépôt ne contient à ce stade que le README, `docs/github-project-automation.md`, la référence de charte graphique (`docs/charte-graphique.md` et `docs/design-tokens.css`), et deux workflows GitHub Actions (`setup-epic-sub-issues.yml`, `sync-epic-statuses.yml`) qui synchronisent le backlog importé de Notion (issues GitHub 1 à 39) et ses épics (issues 40 à 48) avec le [GitHub Project 8](https://github.com/users/PerrineLV/projects/8/views/1) : statut `Ready` propagé aux enfants non démarrés quand l'épic passe `Ready`, épic qui passe `In Progress` dès qu'un enfant est `In Progress` ou `Done`, épic `Done` quand tous les enfants le sont. C'est un exemple concret de tâche infra couverte par l'exception "Code à la main" décochée : Claude peut l'écrire et la maintenir sans que ça compte comme du code d'apprentissage.
+Pas encore de code applicatif. Le dépôt ne contient à ce stade que le README, `docs/github-project-automation.md`, la référence de charte graphique (`docs/charte-graphique.md` et `docs/design-tokens.css`), et deux workflows GitHub Actions (`setup-epic-sub-issues.yml`, `sync-epic-statuses.yml`) qui synchronisent le backlog importé de Notion (issues GitHub 1 à 39) et ses épics (issues 40 à 48) avec le [GitHub Project 8](https://github.com/users/PerrineLV/projects/8/views/1) : statut `Ready` propagé aux enfants non démarrés quand l'épic passe `Ready`, épic qui passe `In Progress` dès qu'un enfant est `In Progress` ou `Done`, épic `Done` quand tous les enfants le sont. C'est un exemple concret de tâche infra couverte par l'exception `Claude: peut coder` : Claude peut l'écrire et la maintenir sans que ça compte comme du code d'apprentissage.
 
 Structure applicative pas encore posée : pas de convention de dossiers à respecter pour l'instant, elle sera décidée avec Perrine au fil des premiers épics plutôt qu'imposée d'avance.
 
@@ -72,7 +81,10 @@ Le backlog fait foi sur le périmètre précis d'une tâche donnée, pas la mém
 gh issue list --repo PerrineLV/OutOfOffice --state open
 gh issue view <numéro> --repo PerrineLV/OutOfOffice
 gh project item-list 8 --owner PerrineLV --format json   # statuts à jour dans le Project
+gh issue list --repo PerrineLV/OutOfOffice --label "infra"          # filtrer par type
 ```
+
+Chaque ticket (issues 1 à 39) porte deux labels issus du backlog Notion, à la place de l'ancien bloc « Métadonnées » qui était dans la description : un label de type (`exercice`, `feature`, `front`, `test`, `doc`, `infra`) et un label de permission `Claude: ne pas coder` / `Claude: peut coder`. L'épic d'un ticket n'est plus écrit dans la description non plus : il est porté par le lien de sous-issue GitHub natif (`gh api repos/PerrineLV/OutOfOffice/issues/<épic>/sub_issues`).
 
 ## Rituel de reprise de session
 
