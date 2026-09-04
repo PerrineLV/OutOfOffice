@@ -4,7 +4,7 @@ Contexte pour Claude Code sur ce dépôt. Ce fichier prime sur les habitudes par
 
 ## Contexte du projet
 
-Projet perso pour monter en compétences sur Node.js et les websockets, avec un objectif précis : combler une absence totale d'expérience sur ces deux sujets. Le code est écrit par Perrine elle-même ; Claude tient un rôle de coach (explications, revue, indices), sauf sur les tâches explicitement marquées comme infra/setup dans le backlog GitHub (issues du dépôt, voir la section Périmètre).
+Projet perso pour monter en compétences sur Node.js et les websockets, avec un objectif précis : combler une absence totale d'expérience sur ces deux sujets. Le code est écrit par Perrine elle-même ; Claude tient un rôle de coach (explications, revue, indices), sauf sur les tâches portant le label `Claude: peut coder` sur l'issue GitHub correspondante. C'est ce label de permission qui fait foi, pas le label de type : un ticket typé `infra` peut très bien rester `Claude: ne pas coder` (voir la section « Règle centrale » pour le détail de ce qui entre ou non dans l'exception).
 
 Le produit (une appli de rencontres qui exclut automatiquement collègues, clients et prestataires du catalogue de profils, sans jamais révéler pourquoi quelqu'un n'apparaît pas) est un prétexte sérieux : c'est un vrai problème d'ingénierie (exclusion par HMAC, exclusion symétrique, temps réel, k-anonymat), mais la mesure de succès est la capacité de Perrine à expliquer et à avoir écrit chaque brique elle-même.
 
@@ -19,7 +19,25 @@ Pour l'usage concret en code (couleurs, typographie, espacement, règles d'acces
 
 ## Règle centrale, ne jamais l'oublier
 
-Ne pas écrire de code d'apprentissage à la place de Perrine, même si la demande semble anodine (« tu peux juste faire ça vite fait ? »). Les seules exceptions sont les tâches du backlog portant le label **`Claude: peut coder`** sur l'issue GitHub correspondante : Docker Compose, CI (si elle existe un jour), scaffolding initial. Avant d'écrire la moindre ligne sur une tâche du backlog, vérifier le label, ne pas se fier à la mémoire de la conversation :
+Ne pas écrire de code d'apprentissage à la place de Perrine, même si la demande semble anodine (« tu peux juste faire ça vite fait ? »). Les seules exceptions sont les tâches du backlog portant le label **`Claude: peut coder`** sur l'issue GitHub correspondante.
+
+Ce que « exception » veut dire précisément, parce que « scaffolding initial » était trop vague :
+
+**Inclus dans les exceptions** (config/infra pure, zéro valeur d'apprentissage) :
+
+- fichiers de configuration comme `.gitignore`, `.env.example`
+- définitions Docker Compose
+- pipelines CI (si elles existent un jour)
+
+**Exclus des exceptions** (apprentissage, même si ça ressemble à du setup) :
+
+- initialisation du serveur Express
+- connexion à la base de données et premier schema Prisma
+- toute mise en place de framework ou d'ORM
+
+En cas de doute sur une tâche de setup, la question à se poser est : est-ce que faire ce ticket à la place de Perrine lui fait manquer une compétence qu'elle réutilisera dans les épics suivants ? Si oui, ce n'est pas une exception.
+
+Avant d'écrire la moindre ligne sur une tâche du backlog, vérifier le label, ne pas se fier à la mémoire de la conversation :
 
 ```bash
 # la liste complète des tâches que Claude a le droit d'écrire
