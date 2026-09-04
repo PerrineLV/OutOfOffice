@@ -1,0 +1,175 @@
+name: Create ticket branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Ticket issue number
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  issues: read
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+      OWNER: PerrineLV
+      REPOSITORY: PerrineLV/OutOfOffice
+      PROJECT_NUMBER: "8"
+      EPIC_ISSUES: "40 41 42 43 44 45 46 47 48"
+      ISSUE_NUMBER: ${{ inputs.issue_number }}
+
+    steps:
+      - name: Create the branch from its epic
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]] || {
+            echo "::error::The ticket number must contain digits only."
+            exit 1
+          }
+
+          issue_title="$(gh issue view "$ISSUE_NUMBER" --repo "$REPOSITORY" --json title --jq '.title')"
+          epic_number=""
+
+          for candidate in $EPIC_ISSUES; do
+            body="$(gh issue view "$candidate" --repo "$REPOSITORY" --json body --jq '.body')"
+            if printf '%s\n' "$body" |
+              grep -Eq "^- \\[[ xX]\\] #${ISSUE_NUMBER}([[:space:]]|$)"; then
+              epic_number="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$epic_number" ]; then
+            echo "::error::Issue #$ISSUE_NUMBER is not listed in any epic."
+            exit 1
+          fi
+
+          epic_branch_info="$(
+            gh api "repos/$REPOSITORY/branches" --paginate \
+              --jq ".[] | select(.name | startswith(\"epic/$epic_number-\")) | [.name, .commit.sha] | @tsv" |
+              head -n 1
+          )"
+
+          if [ -z "$epic_branch_info" ]; then
+            echo "::error::No epic/$epic_number-* branch exists."
+            exit 1
+          fi
+
+          IFS=$'\t' read -r epic_branch epic_sha <<< "$epic_branch_info"
+
+          slug="$(
+            printf '%s' "$issue_title" |
+              iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null |
+              tr '[:upper:]' '[:lower:]' |
+              sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' |
+              cut -c1-60 |
+              sed -E 's/-+$//'
+          )"
+          branch="ticket/$ISSUE_NUMBER-${slug:-work}"
+
+          existing_branch="$(
+            gh api "repos/$REPOSITORY/branches" --paginate \
+              --jq ".[] | select(.name | startswith(\"ticket/$ISSUE_NUMBER-\")) | .name" |
+              head -n 1
+          )"
+          if [ -n "$existing_branch" ]; then
+            echo "::error::Ticket #$ISSUE_NUMBER already has branch $existing_branch."
+            exit 1
+          fi
+
+          gh api "repos/$REPOSITORY/git/refs" \
+            --method POST \
+            -f ref="refs/heads/$branch" \
+            -f sha="$epic_sha" \
+            >/dev/null
+
+          echo "Created $branch from $epic_branch"
+
+          if [ -z "${PROJECT_TOKEN:-}" ]; then
+            echo "::warning::The branch was created, but PROJECT_TOKEN is missing, so the ticket status was not updated."
+            exit 0
+          fi
+
+          GH_TOKEN="$PROJECT_TOKEN" gh project item-add "$PROJECT_NUMBER" \
+            --owner "$OWNER" \
+            --url "https://github.com/$REPOSITORY/issues/$ISSUE_NUMBER" \
+            >/dev/null 2>&1 || true
+
+          GH_TOKEN="$PROJECT_TOKEN" gh api graphql \
+            -F login="$OWNER" \
+            -F number="$PROJECT_NUMBER" \
+            -f query='
+              query($login: String!, $number: Int!) {
+                user(login: $login) {
+                  projectV2(number: $number) {
+                    id
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2SingleSelectField {
+                          id
+                          name
+                          options { id name }
+                        }
+                      }
+                    }
+                    items(first: 100) {
+                      nodes {
+                        id
+                        content {
+                          ... on Issue {
+                            number
+                            repository { nameWithOwner }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ' > project.json
+
+          project_id="$(jq -r '.data.user.projectV2.id // empty' project.json)"
+          status_field_id="$(jq -r '
+            .data.user.projectV2.fields.nodes[]
+            | select(.name == "Status")
+            | .id
+          ' project.json)"
+          in_progress_id="$(jq -r '
+            .data.user.projectV2.fields.nodes[]
+            | select(.name == "Status")
+            | .options[]
+            | select((.name | ascii_downcase) == "in progress")
+            | .id
+          ' project.json | head -n 1)"
+          item_id="$(jq -r \
+            --arg repository "$REPOSITORY" \
+            --argjson number "$ISSUE_NUMBER" '
+              .data.user.projectV2.items.nodes[]
+              | select(
+                  .content.repository.nameWithOwner == $repository
+                  and .content.number == $number
+                )
+              | .id
+            ' project.json | head -n 1)"
+
+          if [ -z "$project_id" ] || [ -z "$status_field_id" ] || [ -z "$in_progress_id" ] || [ -z "$item_id" ]; then
+            echo "::warning::The branch was created, but the ticket could not be moved to In Progress."
+            exit 0
+          fi
+
+          GH_TOKEN="$PROJECT_TOKEN" gh project item-edit \
+            --id "$item_id" \
+            --project-id "$project_id" \
+            --field-id "$status_field_id" \
+            --single-select-option-id "$in_progress_id" \
+            >/dev/null
+
+          echo "Issue #$ISSUE_NUMBER -> In Progress"

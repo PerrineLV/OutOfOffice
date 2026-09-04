@@ -26,6 +26,7 @@ jobs:
       EPIC_ISSUES: "40 41 42 43 44 45 46 47 48"
       READY_STATUS: Ready
       IN_PROGRESS_STATUS: In Progress
+      IN_REVIEW_STATUS: In Review
       DONE_STATUS: Done
 
     steps:
@@ -207,7 +208,7 @@ jobs:
 
               if [ "$child_state" = "CLOSED" ] || [ "$normalized" = "${DONE_STATUS,,}" ]; then
                 any_started=true
-              elif [ "$normalized" = "${IN_PROGRESS_STATUS,,}" ]; then
+              elif [ "$normalized" = "${IN_PROGRESS_STATUS,,}" ] || [ "$normalized" = "${IN_REVIEW_STATUS,,}" ]; then
                 all_done=false
                 any_started=true
               else
@@ -235,8 +236,8 @@ jobs:
               done
             fi
 
-            if [ "$all_done" = true ]; then
-              set_status "$epic" "$DONE_STATUS" "$done_id"
+            if [ "${parent_status,,}" = "${DONE_STATUS,,}" ] || [ "${parent_status,,}" = "${IN_REVIEW_STATUS,,}" ]; then
+              echo "Epic #$epic remains $parent_status."
             elif [ "$any_started" = true ]; then
               set_status "$epic" "$IN_PROGRESS_STATUS" "$in_progress_id"
             elif [ "$any_ready" = true ] || [ "${parent_status,,}" = "${READY_STATUS,,}" ]; then

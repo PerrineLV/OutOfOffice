@@ -1,0 +1,234 @@
+name: Validate Gitflow and sync PR statuses
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize, closed]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  validate-flow:
+    name: Validate Gitflow
+    runs-on: ubuntu-latest
+    outputs:
+      kind: ${{ steps.flow.outputs.kind }}
+      issue_number: ${{ steps.flow.outputs.issue_number }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+      BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+
+    steps:
+      - name: Validate branch names and targets
+        id: flow
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          fail() {
+            echo "::error::$1"
+            exit 1
+          }
+
+          echo "Pull request: $HEAD_BRANCH -> $BASE_BRANCH"
+
+          if [ "$BASE_BRANCH" = "main" ]; then
+            [ "$HEAD_BRANCH" = "dev" ] || fail "Only dev can be merged into main."
+            echo "kind=release" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$BASE_BRANCH" = "dev" ]; then
+            if [[ "$HEAD_BRANCH" =~ ^epic/([0-9]+)-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+              epic_number="${BASH_REMATCH[1]}"
+              gh issue view "$epic_number" --repo "$REPOSITORY" >/dev/null ||
+                fail "Epic issue #$epic_number does not exist."
+
+              echo "kind=epic" >> "$GITHUB_OUTPUT"
+              echo "issue_number=$epic_number" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if [[ "$HEAD_BRANCH" =~ ^chore/[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+              echo "kind=chore" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            fail "Only epic/<issue>-<slug> or chore/<slug> branches can target dev."
+          fi
+
+          if [[ "$BASE_BRANCH" =~ ^epic/([0-9]+)-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+            epic_number="${BASH_REMATCH[1]}"
+
+            [[ "$HEAD_BRANCH" =~ ^ticket/([0-9]+)-[a-z0-9]+(-[a-z0-9]+)*$ ]] ||
+              fail "Only ticket/<issue>-<slug> branches can target an epic branch."
+
+            ticket_number="${BASH_REMATCH[1]}"
+            epic_body="$(gh issue view "$epic_number" --repo "$REPOSITORY" --json body --jq '.body')"
+
+            printf '%s\n' "$epic_body" |
+              grep -Eq "^- \\[[ xX]\\] #${ticket_number}([[:space:]]|$)" ||
+              fail "Issue #$ticket_number is not a child of epic #$epic_number."
+
+            echo "kind=ticket" >> "$GITHUB_OUTPUT"
+            echo "issue_number=$ticket_number" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          fail "Unsupported target branch. Use ticket -> epic -> dev -> main."
+
+  sync-project-status:
+    name: Sync project status
+    needs: validate-flow
+    if: needs.validate-flow.outputs.kind == 'ticket' || needs.validate-flow.outputs.kind == 'epic'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+      OWNER: PerrineLV
+      REPOSITORY: PerrineLV/OutOfOffice
+      PROJECT_NUMBER: "8"
+      ISSUE_NUMBER: ${{ needs.validate-flow.outputs.issue_number }}
+      PR_ACTION: ${{ github.event.action }}
+      PR_MERGED: ${{ github.event.pull_request.merged }}
+      IN_PROGRESS_STATUS: In Progress
+      IN_REVIEW_STATUS: In Review
+      DONE_STATUS: Done
+
+    steps:
+      - name: Update the related issue or epic
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::The PROJECT_TOKEN repository secret is missing."
+            exit 1
+          fi
+
+          case "$PR_ACTION" in
+            opened|reopened|ready_for_review)
+              wanted_status="$IN_REVIEW_STATUS"
+              ;;
+            closed)
+              if [ "$PR_MERGED" = "true" ]; then
+                wanted_status="$DONE_STATUS"
+              else
+                wanted_status="$IN_PROGRESS_STATUS"
+              fi
+              ;;
+            synchronize)
+              echo "No project status change is needed for a new commit."
+              exit 0
+              ;;
+            *)
+              echo "No project status rule for action $PR_ACTION."
+              exit 0
+              ;;
+          esac
+
+          gh project item-add "$PROJECT_NUMBER" \
+            --owner "$OWNER" \
+            --url "https://github.com/$REPOSITORY/issues/$ISSUE_NUMBER" \
+            >/dev/null 2>&1 || true
+
+          gh api graphql \
+            -F login="$OWNER" \
+            -F number="$PROJECT_NUMBER" \
+            -f query='
+              query($login: String!, $number: Int!) {
+                user(login: $login) {
+                  projectV2(number: $number) {
+                    id
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2SingleSelectField {
+                          id
+                          name
+                          options { id name }
+                        }
+                      }
+                    }
+                    items(first: 100) {
+                      nodes {
+                        id
+                        content {
+                          ... on Issue {
+                            number
+                            repository { nameWithOwner }
+                          }
+                        }
+                        fieldValues(first: 20) {
+                          nodes {
+                            ... on ProjectV2ItemFieldSingleSelectValue {
+                              name
+                              field {
+                                ... on ProjectV2SingleSelectField { name }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ' > project.json
+
+          project_id="$(jq -r '.data.user.projectV2.id // empty' project.json)"
+          status_field_id="$(jq -r '
+            .data.user.projectV2.fields.nodes[]
+            | select(.name == "Status")
+            | .id
+          ' project.json)"
+          status_option_id="$(jq -r --arg wanted "$wanted_status" '
+            .data.user.projectV2.fields.nodes[]
+            | select(.name == "Status")
+            | .options[]
+            | select((.name | ascii_downcase) == ($wanted | ascii_downcase))
+            | .id
+          ' project.json | head -n 1)"
+          item="$(jq -c \
+            --arg repository "$REPOSITORY" \
+            --argjson number "$ISSUE_NUMBER" '
+              .data.user.projectV2.items.nodes[]
+              | select(
+                  .content.repository.nameWithOwner == $repository
+                  and .content.number == $number
+                )
+              | {
+                  id,
+                  status: (
+                    [.fieldValues.nodes[] | select(.field.name == "Status") | .name][0] // ""
+                  )
+                }
+            ' project.json | head -n 1)"
+
+          if [ -z "$project_id" ] || [ -z "$status_field_id" ] || [ -z "$item" ]; then
+            echo "::error::Project 8, its Status field, or issue #$ISSUE_NUMBER could not be found."
+            exit 1
+          fi
+
+          if [ -z "$status_option_id" ]; then
+            echo "::error::Add a '$wanted_status' option to the Project 8 Status field."
+            exit 1
+          fi
+
+          current_status="$(jq -r '.status' <<< "$item")"
+          if [ "${current_status,,}" = "${wanted_status,,}" ]; then
+            echo "Issue #$ISSUE_NUMBER is already $wanted_status."
+            exit 0
+          fi
+
+          item_id="$(jq -r '.id' <<< "$item")"
+          gh project item-edit \
+            --id "$item_id" \
+            --project-id "$project_id" \
+            --field-id "$status_field_id" \
+            --single-select-option-id "$status_option_id" \
+            >/dev/null
+
+          echo "Issue #$ISSUE_NUMBER: ${current_status:-No status} -> $wanted_status"

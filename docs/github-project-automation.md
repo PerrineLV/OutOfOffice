@@ -1,101 +1,135 @@
-# GitHub Project automation
+# GitHub Project and Gitflow automation
 
-This repository contains two workflows for the Out of Office backlog.
+This repository automates the Out of Office backlog and its lightweight Gitflow.
 
-## What is already prepared
+## Branch flow
 
-- Issues 1 to 39 are the backlog tickets imported from Notion.
-- Issues 40 to 48 are the epics.
-- `setup-epic-sub-issues.yml` converts the epic checklists into native GitHub sub-issue relationships.
-- `sync-epic-statuses.yml` adds the 48 issues to Project 8 and synchronizes statuses.
+```text
+ticket/<ticket>-<slug> -> epic/<epic>-<slug> -> dev -> main
+```
 
-## Status rules
+- Each epic has its own `epic/<issue>-<slug>` branch, created from `dev`.
+- Each ticket has its own `ticket/<issue>-<slug>` branch, created from its epic branch.
+- `chore/<slug>` branches may target `dev` for repository maintenance.
+- Only `dev` may target `main`.
 
-The synchronization workflow applies these rules:
+## Automated statuses
 
-1. When an epic is moved to `Ready`, children in `Todo`, `Backlog`, `Pas commencé` or `Not started` move to `Ready`.
-2. When at least one child is `In Progress` or `Done`, the epic moves to `In Progress`.
-3. When every child is `Done` or closed, the epic moves to `Done`.
-4. Completed children are never moved backwards.
+| Event | Project status |
+| --- | --- |
+| Create a ticket branch with the workflow | Ticket -> `In Progress` |
+| Open or reopen a ticket PR toward its epic | Ticket -> `In Review` |
+| Merge a ticket PR into its epic | Ticket -> `Done` |
+| Close a ticket PR without merging | Ticket -> `In Progress` |
+| Open or reopen an epic PR toward `dev` | Epic -> `In Review` |
+| Merge an epic PR into `dev` | Epic -> `Done` |
+| Close an epic PR without merging | Epic -> `In Progress` |
 
-The workflow runs every five minutes after activation. It can also be launched manually.
+The periodic epic synchronization still applies these complementary rules:
 
-## One-time setup
+1. Moving an epic to `Ready` moves its unstarted children to `Ready`.
+2. Starting a child moves the epic to `In Progress`.
+3. An epic in `In Review` or `Done` is never moved backwards by the periodic synchronization.
+4. Completing all tickets does not mark the epic `Done`; only merging its PR into `dev` does.
 
-### 1. Check the project statuses
+## Required Project statuses
 
-Open [Project 8](https://github.com/users/PerrineLV/projects/8/views/1) and check that its `Status` field contains exactly:
+Project 8 must contain these exact Status options:
 
 - `Ready`
 - `In Progress`
+- `In Review`
 - `Done`
 
-The project may also contain `Todo` or `Backlog`.
+## Repository secret and variable
 
-If your names differ, edit these values in `.github/workflows/sync-epic-statuses.yml`:
+The workflows use the existing repository secret `PROJECT_TOKEN`. It needs read and write access to the personal Project and access to `PerrineLV/OutOfOffice`.
 
-```yaml
-READY_STATUS: Ready
-IN_PROGRESS_STATUS: In Progress
-DONE_STATUS: Done
+The scheduled epic synchronization runs when the repository variable `EPIC_SYNC_ENABLED` is set to `true`. It can always be launched manually.
+
+## Create a ticket branch
+
+1. Open the repository Actions tab.
+2. Select `Create ticket branch`.
+3. Select `Run workflow`.
+4. Enter the ticket issue number, without `#`.
+
+The workflow finds the ticket in its epic checklist, finds the matching epic branch, creates the ticket branch from it, and moves the ticket to `In Progress`.
+
+To work locally afterward:
+
+```bash
+git fetch origin
+git switch ticket/12-example-slug
 ```
 
-### 2. Create a token for the personal project
+## Pull requests
 
-The normal repository `GITHUB_TOKEN` cannot edit a personal GitHub Project.
+The `Validate Gitflow` check verifies:
 
-1. Open GitHub Settings.
-2. Open Developer settings.
-3. Create a personal access token.
-4. Give it read and write access to Projects.
-5. Give it access to the `PerrineLV/OutOfOffice` repository.
-6. Copy the token once.
+- a ticket PR targets the correct epic branch;
+- the ticket is listed as a child of that epic;
+- an epic PR targets `dev`;
+- only `dev` targets `main`;
+- branch names follow the documented convention.
 
-Use the smallest possible permissions. Never commit this token to the repository.
+The status synchronization is a separate check. This keeps a temporary Project API problem from weakening the structural Gitflow validation.
 
-### 3. Save the token as a repository secret
+## Recommended rulesets
 
-1. Open the repository settings.
-2. Open Secrets and variables, then Actions.
-3. Create a repository secret named `PROJECT_TOKEN`.
-4. Paste the token as its value.
+Create the following rulesets in `Settings > Rules > Rulesets`.
 
-### 4. Create the native parent-child relationships
+### Protect main
 
-1. Open the Actions tab.
-2. Select `Setup epic sub-issues`.
-3. Select `Run workflow`.
-4. Wait for the workflow to finish successfully.
+Target: default branch.
 
-The workflow is idempotent. It can be launched again if a previous run was interrupted.
+- Restrict deletions
+- Block force pushes
+- Require a pull request before merging
+- Required approvals: 0
+- Require conversation resolution
+- Require status check: `Validate Gitflow`
 
-### 5. Test the status synchronization
+### Protect dev
 
-1. Open the Actions tab.
-2. Select `Sync epic statuses`.
-3. Select `Run workflow`.
-4. Confirm that issues 1 to 48 appear in Project 8.
-5. Move one epic to `Ready`.
-6. Launch the workflow again.
-7. Confirm that its unstarted children move to `Ready`.
-8. Move one child to `In Progress`, launch the workflow, and confirm that the epic follows.
-9. Move every child to `Done`, launch the workflow, and confirm that the epic moves to `Done`.
+Target: branch name `dev`.
 
-### 6. Enable the schedule
+- Restrict deletions
+- Block force pushes
+- Require a pull request before merging
+- Required approvals: 0
+- Require conversation resolution
+- Require status check: `Validate Gitflow`
 
-After the manual test succeeds:
+### Protect epic branches
 
-1. Return to Secrets and variables, then Actions.
-2. Open the Variables tab.
-3. Create a repository variable named `EPIC_SYNC_ENABLED`.
-4. Set its value to `true`.
+Target: branch name pattern `epic/*`.
 
-The scheduled synchronization is skipped until this variable exists.
+- Block force pushes
+- Require a pull request before merging
+- Required approvals: 0
+- Require conversation resolution
+- Require status check: `Validate Gitflow`
+
+Do not restrict deletion for `epic/*`, because an epic branch should be deleted after it is merged into `dev`.
+
+In `Settings > General > Pull Requests`, enable automatic deletion of head branches. This deletes ticket branches after their merge into an epic and epic branches after their merge into `dev`.
+
+## Initial epic branches
+
+- `epic/40-fondamentaux-node`
+- `epic/41-exclusion-hmac`
+- `epic/42-socle-applicatif`
+- `epic/43-decouverte-filtree`
+- `epic/44-like-match`
+- `epic/45-chat-temps-reel`
+- `epic/46-blocage`
+- `epic/47-livraison`
+- `epic/48-v2`
 
 ## Troubleshooting
 
-- `The PROJECT_TOKEN repository secret is missing`: create the secret described above.
-- `Project 8 or its Status field could not be found`: verify the token permissions and the project number.
-- `The Status field must contain Ready, In Progress and Done options`: rename the project options or update the workflow variables.
-- An issue is missing from the project: launch the synchronization workflow again.
-- A child is not linked to its epic: launch the sub-issue setup workflow again.
+- `Add a 'In Review' option`: add the missing status to Project 8.
+- `PROJECT_TOKEN repository secret is missing`: recreate or restore the secret.
+- `Issue is not a child of epic`: check the native sub-issue relationship and the epic checklist.
+- `No epic branch exists`: create the documented `epic/<issue>-<slug>` branch from the current `dev` branch.
